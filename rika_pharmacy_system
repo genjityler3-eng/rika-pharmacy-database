@@ -1,0 +1,448 @@
+-- RIKA Drugstore database copy. Import into MySQL/phpMyAdmin.
+-- This file does not modify the original rika_drugstore database.
+CREATE DATABASE IF NOT EXISTS `rika_pharmacy_500` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE `rika_pharmacy_500`;
+
+-- =====================================================
+-- Rika Drugstore: Pharmacy Inventory, Dispensing & Patient Profile System
+-- MySQL 8.0+ (InnoDB, utf8mb4)
+-- Built from the tables and relationships drawn on the draw.io canvas (27 tables)
+-- =====================================================
+
+CREATE DATABASE IF NOT EXISTS `rika_pharmacy_500` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE `rika_pharmacy_500`;
+
+-- =====================================================
+-- 1. USERS & STAFF PROFILES
+-- =====================================================
+
+CREATE TABLE users (
+  user_id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  role_id            INT UNSIGNED NULL,          -- no ROLES table in ERD, so no foreign key
+  username           VARCHAR(50)  NOT NULL,
+  password_hash      VARCHAR(255) NOT NULL,
+  first_name         VARCHAR(50)  NOT NULL,
+  last_name          VARCHAR(50)  NOT NULL,
+  email              VARCHAR(100) NULL,
+  contact_number     VARCHAR(20)  NULL,
+  status             VARCHAR(20)  NOT NULL DEFAULT 'Active',
+  created_at         DATE         NOT NULL DEFAULT (CURRENT_DATE),   -- ERD column: "date"
+  permission_access  VARCHAR(50)  NULL,                              -- ERD column: "permission acces"
+  PRIMARY KEY (user_id),
+  UNIQUE KEY uq_users_username (username),
+  UNIQUE KEY uq_users_email (email)
+) ENGINE=InnoDB;
+
+CREATE TABLE admins (
+  admin_id           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id            INT UNSIGNED NOT NULL,
+  permission_access  BOOLEAN      NOT NULL DEFAULT TRUE,             -- ERD column: "permission access"
+  PRIMARY KEY (admin_id),
+  UNIQUE KEY uq_admins_user (user_id),
+  CONSTRAINT fk_admins_user FOREIGN KEY (user_id) REFERENCES users (user_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE pharmacists (
+  pharmacist_id   INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id         INT UNSIGNED NOT NULL,
+  license_no      VARCHAR(50)  NOT NULL,
+  license_expiry  DATE         NOT NULL,
+  PRIMARY KEY (pharmacist_id),
+  UNIQUE KEY uq_pharmacists_user (user_id),
+  UNIQUE KEY uq_pharmacists_license (license_no),
+  CONSTRAINT fk_pharmacists_user FOREIGN KEY (user_id) REFERENCES users (user_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE pharmacy_assistants (
+  assistant_id               INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id                    INT UNSIGNED NOT NULL,
+  supervising_pharmacist_id  INT UNSIGNED NOT NULL,
+  PRIMARY KEY (assistant_id),
+  UNIQUE KEY uq_assistants_user (user_id),
+  KEY idx_assistants_pharmacist (supervising_pharmacist_id),
+  CONSTRAINT fk_assistants_user FOREIGN KEY (user_id) REFERENCES users (user_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_assistants_pharmacist FOREIGN KEY (supervising_pharmacist_id)
+    REFERENCES pharmacists (pharmacist_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+CREATE TABLE audit_logs (
+  audit_id    INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id     INT UNSIGNED NOT NULL,
+  action      VARCHAR(100) NOT NULL,
+  table_name  VARCHAR(64)  NOT NULL,
+  record_id   INT UNSIGNED NULL,
+  logged_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (audit_id),
+  KEY idx_audit_user (user_id),
+  KEY idx_audit_logged_at (logged_at),
+  CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users (user_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 2. PATIENTS & DOCTORS
+-- =====================================================
+
+CREATE TABLE patients (
+  patient_id      INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  first_name      VARCHAR(50)  NOT NULL,
+  last_name       VARCHAR(50)  NOT NULL,
+  birth_date      DATE         NOT NULL,
+  sex             VARCHAR(10)  NOT NULL,
+  contact_number  VARCHAR(20)  NULL,
+  address         VARCHAR(255) NULL,
+  PRIMARY KEY (patient_id),
+  KEY idx_patients_name (last_name, first_name)
+) ENGINE=InnoDB;
+
+CREATE TABLE patient_allergies (
+  allergy_id     INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  patient_id     INT UNSIGNED NOT NULL,
+  allergen_name  VARCHAR(100) NOT NULL,
+  reaction_note  VARCHAR(255) NULL,
+  PRIMARY KEY (allergy_id),
+  KEY idx_allergies_patient (patient_id),
+  CONSTRAINT fk_allergies_patient FOREIGN KEY (patient_id) REFERENCES patients (patient_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE doctor (
+  prescriber_id   INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  first_name      VARCHAR(50)  NOT NULL,
+  last_name       VARCHAR(50)  NOT NULL,
+  license_no      VARCHAR(50)  NOT NULL,
+  contact_number  VARCHAR(20)  NULL,
+  PRIMARY KEY (prescriber_id),
+  UNIQUE KEY uq_doctor_license (license_no)
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 3. MEDICATION CATALOG
+-- =====================================================
+
+CREATE TABLE categories (
+  category_id    INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  category_name  VARCHAR(100) NOT NULL,
+  dose           VARCHAR(50)  NULL,
+  PRIMARY KEY (category_id),
+  UNIQUE KEY uq_categories_name (category_name)
+) ENGINE=InnoDB;
+
+CREATE TABLE units (
+  unit_id       INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  unit_name     VARCHAR(50)  NOT NULL,
+  abbreviation  VARCHAR(10)  NOT NULL,
+  PRIMARY KEY (unit_id),
+  UNIQUE KEY uq_units_name (unit_name)
+) ENGINE=InnoDB;
+
+CREATE TABLE medications (
+  medication_id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  category_id            INT UNSIGNED NOT NULL,
+  unit_id                INT UNSIGNED NOT NULL,
+  brand_name             VARCHAR(150) NOT NULL,
+  manufacture_name       VARCHAR(150) NULL,
+  strength               VARCHAR(50)  NULL,
+  dosage_form            VARCHAR(50)  NULL,
+  requires_prescription  BOOLEAN      NOT NULL DEFAULT FALSE,
+  min_threshold          INT UNSIGNED NOT NULL DEFAULT 0,
+  availability           BOOLEAN      NOT NULL DEFAULT TRUE,
+  PRIMARY KEY (medication_id),
+  KEY idx_med_brand (brand_name),
+  KEY idx_med_category (category_id),
+  KEY idx_med_unit (unit_id),
+  CONSTRAINT fk_med_category FOREIGN KEY (category_id) REFERENCES categories (category_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_med_unit FOREIGN KEY (unit_id) REFERENCES units (unit_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 4. PRESCRIPTIONS
+-- =====================================================
+
+CREATE TABLE prescriptions (
+  prescription_id    INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  patient_id         INT UNSIGNED NOT NULL,
+  prescriber_id      INT UNSIGNED NOT NULL,
+  prescription_date  DATE         NOT NULL,
+  status             VARCHAR(20)  NOT NULL DEFAULT 'Pending',
+  created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- ERD column: "date"
+  PRIMARY KEY (prescription_id),
+  KEY idx_rx_patient (patient_id),
+  KEY idx_rx_prescriber (prescriber_id),
+  CONSTRAINT fk_rx_patient FOREIGN KEY (patient_id) REFERENCES patients (patient_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_rx_prescriber FOREIGN KEY (prescriber_id) REFERENCES doctor (prescriber_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+CREATE TABLE prescription_items (
+  rx_item_id           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  prescription_id      INT UNSIGNED NOT NULL,
+  medication_id        INT UNSIGNED NOT NULL,
+  quantity_prescribed  INT UNSIGNED NOT NULL,
+  dosage_instructions  VARCHAR(255) NULL,
+  PRIMARY KEY (rx_item_id),
+  KEY idx_rxi_prescription (prescription_id),
+  KEY idx_rxi_medication (medication_id),
+  CONSTRAINT chk_rxi_qty CHECK (quantity_prescribed > 0),
+  CONSTRAINT fk_rxi_prescription FOREIGN KEY (prescription_id) REFERENCES prescriptions (prescription_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_rxi_medication FOREIGN KEY (medication_id) REFERENCES medications (medication_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 5. PROCUREMENT & INVENTORY
+-- =====================================================
+
+CREATE TABLE suppliers (
+  supplier_id     INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  supplier_name   VARCHAR(150) NOT NULL,
+  contact_person  VARCHAR(100) NULL,
+  PRIMARY KEY (supplier_id),
+  UNIQUE KEY uq_suppliers_name (supplier_name)
+) ENGINE=InnoDB;
+
+CREATE TABLE purchase_orders (
+  po_id        INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  supplier_id  INT UNSIGNED NOT NULL,
+  ordered_by   INT UNSIGNED NOT NULL,
+  order_date   DATE         NOT NULL,
+  status       VARCHAR(20)  NOT NULL DEFAULT 'Pending',
+  PRIMARY KEY (po_id),
+  KEY idx_po_supplier (supplier_id),
+  KEY idx_po_ordered_by (ordered_by),
+  CONSTRAINT fk_po_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers (supplier_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_po_ordered_by FOREIGN KEY (ordered_by) REFERENCES users (user_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+CREATE TABLE purchase_order_items (
+  po_item_id     INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  po_id          INT UNSIGNED  NOT NULL,
+  medication_id  INT UNSIGNED  NOT NULL,
+  quantity       INT UNSIGNED  NOT NULL,
+  cost_price     DECIMAL(10,2) NOT NULL,
+  PRIMARY KEY (po_item_id),
+  KEY idx_poi_po (po_id),
+  KEY idx_poi_medication (medication_id),
+  CONSTRAINT chk_poi_qty CHECK (quantity > 0),
+  CONSTRAINT chk_poi_cost CHECK (cost_price >= 0),
+  CONSTRAINT fk_poi_po FOREIGN KEY (po_id) REFERENCES purchase_orders (po_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_poi_medication FOREIGN KEY (medication_id) REFERENCES medications (medication_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+CREATE TABLE inventory_batches (
+  batch_id       INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  medication_id  INT UNSIGNED NOT NULL,
+  supplier_id    INT UNSIGNED NOT NULL,
+  expiry_date    DATE         NOT NULL,
+  qty_on_hand    INT UNSIGNED NOT NULL DEFAULT 0,
+  received_date  DATE         NOT NULL,
+  PRIMARY KEY (batch_id),
+  KEY idx_batch_medication (medication_id),
+  KEY idx_batch_supplier (supplier_id),
+  KEY idx_batch_expiry (expiry_date),
+  CONSTRAINT fk_batch_medication FOREIGN KEY (medication_id) REFERENCES medications (medication_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_batch_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers (supplier_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+CREATE TABLE movement_types (
+  movement_type_id    INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  movement_type_name  VARCHAR(50)  NOT NULL,
+  movement_category   VARCHAR(20)  NOT NULL,
+  description         TEXT         NULL,
+  PRIMARY KEY (movement_type_id),
+  UNIQUE KEY uq_movement_type_name (movement_type_name)
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 6. DISPENSING
+-- =====================================================
+
+CREATE TABLE dispensing_logs (
+  dispensing_log_id  INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  prescription_id    INT UNSIGNED NOT NULL,
+  patient_id         INT UNSIGNED NOT NULL,
+  pharmacist_id      INT UNSIGNED NOT NULL,
+  user_id            INT UNSIGNED NULL,          -- no foreign key drawn in ERD
+  PRIMARY KEY (dispensing_log_id),
+  KEY idx_dl_prescription (prescription_id),
+  KEY idx_dl_patient (patient_id),
+  KEY idx_dl_pharmacist (pharmacist_id),
+  CONSTRAINT fk_dl_prescription FOREIGN KEY (prescription_id) REFERENCES prescriptions (prescription_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_dl_patient FOREIGN KEY (patient_id) REFERENCES patients (patient_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_dl_pharmacist FOREIGN KEY (pharmacist_id) REFERENCES pharmacists (pharmacist_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+CREATE TABLE dispensing_items (
+  dispensing_item_id  INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  dispensing_log_id   INT UNSIGNED  NOT NULL,
+  batch_id            INT UNSIGNED  NOT NULL,
+  rx_item_id          INT UNSIGNED  NOT NULL,
+  quantity            INT UNSIGNED  NOT NULL,
+  unit_price          DECIMAL(10,2) NOT NULL,
+  PRIMARY KEY (dispensing_item_id),
+  KEY idx_di_log (dispensing_log_id),
+  KEY idx_di_batch (batch_id),
+  KEY idx_di_rx_item (rx_item_id),
+  CONSTRAINT chk_di_qty CHECK (quantity > 0),
+  CONSTRAINT chk_di_price CHECK (unit_price >= 0),
+  CONSTRAINT fk_di_log FOREIGN KEY (dispensing_log_id) REFERENCES dispensing_logs (dispensing_log_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_di_batch FOREIGN KEY (batch_id) REFERENCES inventory_batches (batch_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_di_rx_item FOREIGN KEY (rx_item_id) REFERENCES prescription_items (rx_item_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 7. STOCK MOVEMENTS, STOCK IN, STOCK OUT
+-- =====================================================
+
+CREATE TABLE stock_movements (
+  movement_id         INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  batch_id            INT UNSIGNED NOT NULL,
+  user_id             INT UNSIGNED NOT NULL,
+  dispensing_item_id  INT UNSIGNED NULL,
+  movement_type       VARCHAR(50)  NOT NULL,     -- references movement_types.movement_type_name
+  reason              VARCHAR(255) NULL,
+  quantity            INT          NOT NULL,
+  movement_date       DATE         NOT NULL DEFAULT (CURRENT_DATE),   -- ERD column: "date"
+  PRIMARY KEY (movement_id),
+  KEY idx_sm_batch (batch_id),
+  KEY idx_sm_user (user_id),
+  KEY idx_sm_dispensing_item (dispensing_item_id),
+  KEY idx_sm_type (movement_type),
+  CONSTRAINT fk_sm_batch FOREIGN KEY (batch_id) REFERENCES inventory_batches (batch_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_sm_user FOREIGN KEY (user_id) REFERENCES users (user_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_sm_dispensing_item FOREIGN KEY (dispensing_item_id)
+    REFERENCES dispensing_items (dispensing_item_id)
+    ON UPDATE CASCADE ON DELETE SET NULL,
+  CONSTRAINT fk_sm_type FOREIGN KEY (movement_type)
+    REFERENCES movement_types (movement_type_name)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+CREATE TABLE stock_in (
+  stock_in_id    INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  batch_id       INT UNSIGNED NOT NULL,
+  user_id        INT UNSIGNED NOT NULL,
+  quantity       INT UNSIGNED NOT NULL,
+  stock_in_date  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  remarks        TEXT         NULL,
+  PRIMARY KEY (stock_in_id),
+  KEY idx_stockin_batch (batch_id),
+  KEY idx_stockin_user (user_id),
+  CONSTRAINT chk_stockin_qty CHECK (quantity > 0),
+  CONSTRAINT fk_stockin_batch FOREIGN KEY (batch_id) REFERENCES inventory_batches (batch_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_stockin_user FOREIGN KEY (user_id) REFERENCES users (user_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+CREATE TABLE stock_out (
+  stock_out_id      INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  batch_id          INT UNSIGNED NOT NULL,
+  user_id           INT UNSIGNED NOT NULL,
+  movement_type_id  INT UNSIGNED NOT NULL,
+  quantity          INT UNSIGNED NOT NULL,
+  stock_out_date    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  remarks           TEXT         NULL,
+  PRIMARY KEY (stock_out_id),
+  KEY idx_stockout_batch (batch_id),
+  KEY idx_stockout_user (user_id),
+  KEY idx_stockout_type (movement_type_id),
+  CONSTRAINT chk_stockout_qty CHECK (quantity > 0),
+  CONSTRAINT fk_stockout_batch FOREIGN KEY (batch_id) REFERENCES inventory_batches (batch_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_stockout_user FOREIGN KEY (user_id) REFERENCES users (user_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_stockout_type FOREIGN KEY (movement_type_id) REFERENCES movement_types (movement_type_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 8. SALES, DISCOUNTS & PAYMENTS
+-- =====================================================
+
+CREATE TABLE sales (
+  sale_id       INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  sale_date     DATE          NOT NULL DEFAULT (CURRENT_DATE),
+  total_amount  DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  PRIMARY KEY (sale_id),
+  KEY idx_sales_date (sale_date),
+  CONSTRAINT chk_sales_total CHECK (total_amount >= 0)
+) ENGINE=InnoDB;
+
+CREATE TABLE sale_items (
+  sale_item_id  INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  sale_id       INT UNSIGNED  NOT NULL,
+  batch_id      INT UNSIGNED  NOT NULL,
+  quantity      INT UNSIGNED  NOT NULL,
+  unit_price    DECIMAL(10,2) NOT NULL,
+  PRIMARY KEY (sale_item_id),
+  KEY idx_si_sale (sale_id),
+  KEY idx_si_batch (batch_id),
+  CONSTRAINT chk_si_qty CHECK (quantity > 0),
+  CONSTRAINT chk_si_price CHECK (unit_price >= 0),
+  CONSTRAINT fk_si_sale FOREIGN KEY (sale_id) REFERENCES sales (sale_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_si_batch FOREIGN KEY (batch_id) REFERENCES inventory_batches (batch_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+CREATE TABLE discounts (
+  discount_id    INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  discount_name  VARCHAR(100)  NOT NULL,
+  discount_rate  DECIMAL(5,2)  NOT NULL,
+  description    TEXT          NULL,
+  is_active      BOOLEAN       NOT NULL DEFAULT TRUE,
+  PRIMARY KEY (discount_id),
+  UNIQUE KEY uq_discount_name (discount_name),
+  CONSTRAINT chk_discount_rate CHECK (discount_rate >= 0 AND discount_rate <= 100)
+) ENGINE=InnoDB;
+
+CREATE TABLE payments (
+  payment_id       INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  sale_id          INT UNSIGNED  NOT NULL,
+  discount_id      INT UNSIGNED  NULL,
+  subtotal         DECIMAL(10,2) NOT NULL,
+  discount_amount  DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  total_amount     DECIMAL(10,2) NOT NULL,
+  amount_paid      DECIMAL(10,2) NOT NULL,
+  change_amount    DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  payment_method   VARCHAR(30)   NOT NULL,
+  receipt_no       VARCHAR(30)   NOT NULL,
+  payment_date     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (payment_id),
+  UNIQUE KEY uq_payments_sale (sale_id),
+  UNIQUE KEY uq_payments_receipt (receipt_no),
+  KEY idx_payments_discount (discount_id),
+  CONSTRAINT chk_pay_amounts CHECK (subtotal >= 0 AND discount_amount >= 0
+                                    AND total_amount >= 0 AND amount_paid >= 0
+                                    AND change_amount >= 0),
+  CONSTRAINT fk_payments_sale FOREIGN KEY (sale_id) REFERENCES sales (sale_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_payments_discount FOREIGN KEY (discount_id) REFERENCES discounts (discount_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+
+SET FOREIGN_KEY_CHECKS=1;
